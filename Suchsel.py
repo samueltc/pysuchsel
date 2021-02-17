@@ -55,6 +55,7 @@ class Suchsel():
 		self._placement = placement
 		self._attempts = attempts
 		self._grid = { }
+		self._rules = dict()
 
 	def _rulerange(self, origin_x, origin_y, rulename):
 		(x, y) = (origin_x, origin_y)
@@ -170,6 +171,12 @@ class Suchsel():
 		# All letters fit!
 		for (want_place, (x, y)) in zip(word, self._rulerange(src_x, src_y, rule)):
 			self._grid[(x, y)] = want_place
+
+		# Track used rules
+		if rule not in self._rules:
+			self._rules[rule] = 0
+		self._rules[rule] += 1
+
 		return True
 
 	def place(self, word, contiguous = False):
