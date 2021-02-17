@@ -41,6 +41,13 @@ class Alphabet():
 	def get(self):
 		return self._dist.event()
 
+class Word():
+	def __init__(self, word):
+		self.word = list(word)
+
+	def get(self):
+		return self.word.pop(0)
+
 if __name__ == "__main__":
 	alpha = Alphabet("az-de", "natlang-de")
 	for i in range(20):

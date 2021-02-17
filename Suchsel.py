@@ -49,13 +49,14 @@ class ArrowMarker():
 		}.get(self._direction, "?")
 
 class Suchsel():
-	def __init__(self, width, height, placement, attempts):
+	def __init__(self, width, height, placement, attempts, verbose=0):
 		self._width = width
 		self._height = height
 		self._placement = placement
 		self._attempts = attempts
 		self._grid = { }
 		self._rules = dict()
+		self._verbose = verbose
 
 	def _rulerange(self, origin_x, origin_y, rulename):
 		(x, y) = (origin_x, origin_y)
@@ -177,6 +178,9 @@ class Suchsel():
 			self._rules[rule] = 0
 		self._rules[rule] += 1
 
+		if self._verbose > 0:
+			self.dump()
+
 		return True
 
 	def place(self, word, contiguous = False):
@@ -197,6 +201,16 @@ class Suchsel():
 				return True
 		return False
 
+	def can_hide(self, word):
+		spaces = self._height * self._width
+		void = spaces - len(self._grid)
+		if void == len(word):
+			if self._verbose > 0:
+				print ('Can hide', word)
+			return True
+		else:
+			return False
+
 	def fill(self, filler):
 		for y in range(self._height):
 			for x in range(self._width):
@@ -205,6 +219,7 @@ class Suchsel():
 					self._grid[pos] = filler.get()
 
 	def dump(self):
+		from pprint import pprint
 		print("+-" + "-" * (2 * self._width) + "-+")
 		for y in range(self._height):
 			line = [ ]
