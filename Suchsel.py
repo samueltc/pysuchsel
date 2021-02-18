@@ -50,6 +50,17 @@ class ArrowMarker():
 			"down":		"v",
 		}.get(self._direction, "?")
 
+DIRECTIONS = dict(
+	lr=lambda x, y: (x + 1, y),
+	rl=lambda x, y: (x - 1, y),
+	tb=lambda x, y: (x, y - 1),
+	bt=lambda x, y: (x, y + 1),
+	dbr=lambda x, y: (x + 1, y - 1),
+	dbl=lambda x, y: (x - 1, y - 1),
+	dtr=lambda x, y: (x + 1, y + 1),
+	dtl=lambda x, y: (x - 1, y + 1)
+)
+
 class Suchsel():
 	def __init__(self, width, height, placement, attempts, verbose=0, print_word=None):
 		self._width = width
@@ -199,17 +210,26 @@ class Suchsel():
 		return False
 
 	def place(self, word, contiguous = False):
-		placed = self._place(word, contiguous)
+		self._grid_previous = self._grid
 
 		if self.is_substring(word):
 			if self._verbose > 0:
 				print ("Won't place:", word, " because is substring.")
 			return False
 
-		if placed:
-			self._words.append(word)
+		if not self._place(word, contiguous):
+			return False
 
-		return placed
+		if self.is_coocurence(word):
+			# rollback
+			if self._verbose > 0:
+				print ('found cooccurence! grid rollback...')
+			self._grid = self._grid_previous
+			return False
+
+		self._words.append(word)
+
+		return True
 
 	def place_crossword(self, word, crossword_marker):
 		contiguous = (len(self._grid) > 0)
@@ -232,7 +252,7 @@ class Suchsel():
 			return False
 
 	def can_hide(self):
-		hidden_size = random.randrange(4,12)
+		hidden_size = random.randrange(5,12)
 		if self.void <= hidden_size:
 			if self._verbose > 0:
 				print ('Will hide a word of length', self.void, hidden_size)
@@ -244,6 +264,34 @@ class Suchsel():
 				return True
 		return False
 
+	def is_coocurence(self, word):
+		count = 0
+		for x, y in self._letters_idx[word[0]]:
+			for rule in DIRECTIONS.keys():
+				if self.search(word[1:], x, y, rule):
+					count += 1
+
+		return count > 1
+
+	def search(self, part, x, y, rule):
+		letter, remaining = part[0], part[1:]
+		if not remaining:
+			return True
+
+		pos = DIRECTIONS[rule](x, y)
+		if pos in self._grid and self._grid[pos] == letter:
+			x, y = pos
+			return self.search(remaining, x, y, rule)
+
+	@property
+	def _letters_idx(self):
+		_ = dict()
+		for pos, letter in self._grid.items():
+			if letter not in _:
+				_[letter] = []
+			_[letter].append(pos)
+		return _
+
 	def fill(self, filler):
 		for y in range(self._height):
 			for x in range(self._width):
@@ -254,14 +302,14 @@ class Suchsel():
 	def dump(self):
 		from pprint import pprint
 		print ('\n'.join(self._words))
-		print("+-" + "-" * (2 * self._width) + "-+")
+		print ("  " + ("0123456789" * 10)[:self._width])
 		for y in range(self._height):
 			line = [ ]
 			for x in range(self._width):
 				letter = self._grid.get((x, y), " ")
 				line.append(str(letter))
-			print("| " + (" ".join(line)) + "  |")
-		print("+-" + ("-" * (2 * self._width)) + "-+")
+			print(f'{y:02}' + ("".join(line)))
+		
 
 	def write_svg(self, output_filename, place_letters = True):
 		svg = SVGDocument()
