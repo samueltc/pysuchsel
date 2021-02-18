@@ -6,3 +6,4 @@ outdir/
 *.xlsx
 *.svg
 .DS_Store
+dict/

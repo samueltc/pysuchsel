@@ -200,8 +200,15 @@ class Suchsel():
 
 	def place(self, word, contiguous = False):
 		placed = self._place(word, contiguous)
+
+		if self.is_substring(word):
+			if self._verbose > 0:
+				print ("Won't place:", word, " because is substring.")
+			return False
+
 		if placed:
 			self._words.append(word)
+
 		return placed
 
 	def place_crossword(self, word, crossword_marker):
@@ -210,7 +217,6 @@ class Suchsel():
 			if self._attempt_place(word, must_be_contiguous = contiguous, crossword_marker = crossword_marker):
 				return True
 		return False
-
 
 	@property
 	def void(self):
@@ -231,6 +237,12 @@ class Suchsel():
 			if self._verbose > 0:
 				print ('Will hide a word of length', self.void, hidden_size)
 			return hidden_size
+
+	def is_substring(self, word):
+		for placed in self._words:
+			if word in placed:
+				return True
+		return False
 
 	def fill(self, filler):
 		for y in range(self._height):
