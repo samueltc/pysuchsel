@@ -21,6 +21,8 @@
 import random
 import collections
 from SVGDocument import SVGDocument
+import pylightxl as xl
+import os
 
 class VoidPlaceholder():
 	def __eq__(self, other):
@@ -49,14 +51,16 @@ class ArrowMarker():
 		}.get(self._direction, "?")
 
 class Suchsel():
-	def __init__(self, width, height, placement, attempts, verbose=0):
+	def __init__(self, width, height, placement, attempts, verbose=0, print_word=None):
 		self._width = width
 		self._height = height
 		self._placement = placement
 		self._attempts = attempts
 		self._grid = { }
+		self._words = []
 		self._rules = dict()
 		self._verbose = verbose
+		self.print_word = print_word
 
 	def _rulerange(self, origin_x, origin_y, rulename):
 		(x, y) = (origin_x, origin_y)
@@ -178,12 +182,12 @@ class Suchsel():
 			self._rules[rule] = 0
 		self._rules[rule] += 1
 
-		if self._verbose > 0:
+		if self._verbose > 1:
 			self.dump()
 
 		return True
 
-	def place(self, word, contiguous = False):
+	def _place(self, word, contiguous = False):
 		# First try contiguous placement
 		if contiguous and (len(self._grid) > 0):
 			for i in range(self._attempts):
@@ -194,6 +198,12 @@ class Suchsel():
 				return True
 		return False
 
+	def place(self, word, contiguous = False):
+		placed = self._place(word, contiguous)
+		if placed:
+			self._words.append(word)
+		return placed
+
 	def place_crossword(self, word, crossword_marker):
 		contiguous = (len(self._grid) > 0)
 		for i in range(self._attempts):
@@ -201,15 +211,26 @@ class Suchsel():
 				return True
 		return False
 
-	def can_hide(self, word):
+
+	@property
+	def void(self):
 		spaces = self._height * self._width
-		void = spaces - len(self._grid)
-		if void == len(word):
+		return (spaces - len(self._grid))
+	
+	def hide_word(self, word):
+		if self.void == len(word):
 			if self._verbose > 0:
 				print ('Can hide', word)
 			return True
 		else:
 			return False
+
+	def can_hide(self):
+		hidden_size = random.randrange(4,12)
+		if self.void <= hidden_size:
+			if self._verbose > 0:
+				print ('Will hide a word of length', self.void, hidden_size)
+			return hidden_size
 
 	def fill(self, filler):
 		for y in range(self._height):
@@ -220,6 +241,7 @@ class Suchsel():
 
 	def dump(self):
 		from pprint import pprint
+		print ('\n'.join(self._words))
 		print("+-" + "-" * (2 * self._width) + "-+")
 		for y in range(self._height):
 			line = [ ]
@@ -249,3 +271,68 @@ class Suchsel():
 			svg.write(f)
 
 
+	def write_xls(self, solution, outfile=None, metafile=False):
+		size_x, size_y = (self._height, self._width)
+		words = self._words
+
+		if not outfile:
+			basename = f'mots-caches-{size_x}-{size_y}-{len(words):03}-{solution}'
+		else:
+			basename = outfile
+
+		words = sorted(words)
+
+		##########
+		# game
+		db = xl.Database()
+		db.add_ws(ws="jeu")
+		for col in range(self._width):
+			for row in range(self._height):
+				pos = (col, row)
+				letter = self._grid.get(pos)
+				db.ws(ws='jeu').update_index(row=row+1, col=col+1, val=letter)
+
+		##########
+		# words
+		if metafile:
+			fh_mots = open(f'{basename}-mots.txt', 'w')
+			fh_mots.write(f'Mot de {len(solution)} lettres.\n')
+		else:
+			db.add_ws(ws="mots")		
+
+		letter = None
+		col = 0
+		for word in words:
+			if word[0] != letter:
+				col += 1
+				letter = word[0]
+				row = 2
+				if metafile:
+					fh_mots.write(f'{letter}\n')
+				else:
+					db.ws(ws='mots').update_index(row=row, col=col, val=letter)			
+				print (row, letter)
+
+			row += 1
+			print (11, row, word)
+			if metafile:
+				fh_mots.write(f'{self.print_word(word)}\n')
+			else:
+				db.ws(ws='mots').update_index(row=row, col=col, val=self.print_word(word))
+
+
+		if metafile:
+			fh_mots.close()
+
+		##########
+		# solution
+		if metafile:
+			fh_solution = open(f'{basename}-solution.txt', 'w')
+			fh_solution.write(self.print_word(solution))
+			fh_solution.close()
+		else:
+			db.add_ws(ws="solution")
+			db.ws(ws='solution').update_index(row=1, col=1, val=f'Mot de {len(solution)} lettres.')
+			db.ws(ws='solution').update_index(row=2, col=1, val=self.print_word(solution))
+
+		xl.writexl(db=db, fn=f'{basename}.xls')

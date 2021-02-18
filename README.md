@@ -323,6 +323,11 @@ $ ./pysuchsel -v --mode=crossword -a 50 words.txt my_first_crossword.svg
 +--------------------------------+
 ```
 
+Create a puzzle using all placement rules
+```
+./pysuchsel -x 18 -y 18 --placement={lr,tb,rl,bt,dbr,dtr,dbl,dtl} dictio.txt out.svg
+```
+
 The rendering of this now looks like this:
 
 ![Paddelfisch Crossword](https://raw.githubusercontent.com/johndoe31415/pysuchsel/master/docs/my_first_crossword.png)
