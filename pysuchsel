@@ -40,10 +40,13 @@ parser.add_argument("-a", "--creation-attempts", metavar = "cnt", type = int, de
 parser.add_argument("--empty", action = "store_true", help = "When creating SVGs, do not fill letters in. Useful for crossword mode.")
 parser.add_argument("--nofill", action = "store_true", help = "For debugging, does not fill empty spaces with letters.")
 parser.add_argument("--hide-word", action = "store_true", help = "Hide random word from wordlist.")
+parser.add_argument("--write-svg", action = "store_true", help = "Output as SVG.")
+parser.add_argument("--write-txt", action = "store_true", help = "Output as TXT.")
 parser.add_argument("--write-xls", action = "store_true", help = "Output as XLS.")
 parser.add_argument("--write-xls-metafile", action = "store_true", help = "Output as XLS with meta in text files.")
 parser.add_argument("--nice-words", action = "store_true", help = "Load an external mapping to get the publishable version of a word.")
 parser.add_argument("-v", "--verbose", action = "count", default = 0, help = "Increases verbosity. Can be specified multiple times to increase.")
+parser.add_argument("--seed", type = int, help = "Seed used to initialize RNG")
 parser.add_argument("infile", metavar = "infile", help = "Input filename that contains all words separated by newlines.")
 parser.add_argument("outfile", metavar = "outfile", help = "Output SVG file to create.")
 args = parser.parse_args(sys.argv[1:])
@@ -55,6 +58,10 @@ with open(args.infile) as f:
 		if line.startswith("#") or line == "":
 			continue
 		words.append(line.upper())
+
+if args.seed:
+	random.seed(args.seed)
+
 random.shuffle(words)
 
 def load_words(filename):
@@ -90,49 +97,33 @@ for creation_attempt in range(args.creation_attempts):
 	suchsel = Suchsel(args.width, args.height, plcrule, 
 		attempts = args.place_attempts, verbose = args.verbose, print_word=print_word)
 	for word in words:
-		if args.mode == "suchsel":
-			placed = suchsel.place(word, contiguous = args.contiguous)
-			if placed and args.hide_word:
-				hidden_word_length = suchsel.can_hide()
-				if hidden_word_length:
-					for candidate in unplaced_words:
-						if suchsel.hide_word(candidate):
-							hidden_word = candidate
-							stop = True
+		placed = suchsel.place(word, contiguous = args.contiguous)
 
-		elif args.mode == "crossword":
-			placed = suchsel.place_crossword(word, crossword_marker = next_id)
-			if placed:
-				placed_words[next_id] = word
-				next_id += 1
-		else:
-			raise NotImplementedError(args.mode)
-		if stop:
-			break
 		if not placed:
 			unplaced_words.append(word)
+
+		if suchsel.void < 10:
+			break
 	if len(unplaced_words) == 0:
 		break
 
-if args.verbose > 1:
+if args.verbose > 3:
 	for unplaced_word in unplaced_words:
 		print("Warning: could not place word \"%s\"." % (unplaced_word))
-
-if args.mode == "crossword":
-	for (word_id, word) in sorted(placed_words.items()):
-		print("%2d: %s" % (word_id, word))
 
 if args.verbose >= 1:
 	suchsel.dump()
 
-if (not args.nofill) and (args.mode == "suchsel"):
-	if args.hide_word:
-		filler = Word(hidden_word)
-	else:
-		filler = Alphabet(args.fill_rule, args.fill_dist)
-	suchsel.fill(filler)
-	if args.verbose > 0:
-		suchsel.dump()
+for word in unplaced_words:
+	if len(word) == suchsel.void:
+		hidden_word = word
+		suchsel.hidden_word = word
+		print ('try hidden', word)
+		if suchsel.fill(hidden_word):
+			break
+
+if args.verbose > 0:
+	suchsel.dump()
 
 if args.write_xls or args.write_xls_metafile:
 	suchsel.write_xls(
@@ -140,6 +131,9 @@ if args.write_xls or args.write_xls_metafile:
 		metafile=args.write_xls_metafile,
 		solution=hidden_word
 	)
-else:
+
+if args.write_svg:
 	suchsel.write_svg(args.outfile, place_letters = not args.empty)
 
+if args.write_txt:
+	suchsel.write_txt(args.outfile)

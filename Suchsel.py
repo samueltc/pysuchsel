@@ -50,7 +50,7 @@ class ArrowMarker():
 			"down":		"v",
 		}.get(self._direction, "?")
 
-DIRECTIONS = dict(
+move = dict(
 	lr=lambda x, y: (x + 1, y),
 	rl=lambda x, y: (x - 1, y),
 	tb=lambda x, y: (x, y - 1),
@@ -72,6 +72,7 @@ class Suchsel():
 		self._rules = dict()
 		self._verbose = verbose
 		self.print_word = print_word
+		self.hidden_word = None
 
 	def _rulerange(self, origin_x, origin_y, rulename):
 		(x, y) = (origin_x, origin_y)
@@ -209,8 +210,14 @@ class Suchsel():
 				return True
 		return False
 
+	def checkpoint(self):
+		self._grid_previous = self._grid.copy()
+
+	def rollback(self):
+		self._grid = self._grid_previous
+
 	def place(self, word, contiguous = False):
-		self._grid_previous = self._grid
+		self.checkpoint()
 
 		if self.is_substring(word):
 			if self._verbose > 0:
@@ -220,12 +227,13 @@ class Suchsel():
 		if not self._place(word, contiguous):
 			return False
 
-		if self.is_coocurence(word):
-			# rollback
-			if self._verbose > 0:
-				print ('found cooccurence! grid rollback...')
-			self._grid = self._grid_previous
-			return False
+		for _ in self._words + [word]:
+			if self.is_coocurence(_):
+				# rollback
+				if self._verbose > 0:
+					print ('found cooccurence! grid rollback...')
+				self.rollback()
+				return False
 
 		self._words.append(word)
 
@@ -260,28 +268,37 @@ class Suchsel():
 
 	def is_substring(self, word):
 		for placed in self._words:
-			if word in placed:
+			if word in placed or placed in word:
+				if self._verbose > 1:
+					print ('attempt', word, 'placed', placed, 'are substring!')
 				return True
 		return False
 
 	def is_coocurence(self, word):
 		count = 0
-		for x, y in self._letters_idx[word[0]]:
-			for rule in DIRECTIONS.keys():
-				if self.search(word[1:], x, y, rule):
+		for pos in self._letters_idx[word[0]]:
+			for rule in move.keys():
+				path = self.search(word, rule, pos)
+				if len(path) == len(word):
 					count += 1
+
+		if count > 1:
+			return True
 
 		return count > 1
 
-	def search(self, part, x, y, rule):
-		letter, remaining = part[0], part[1:]
+	def search(self, word, rule, pos):
+		remaining = word[1:]
 		if not remaining:
-			return True
+			return [pos]
 
-		pos = DIRECTIONS[rule](x, y)
-		if pos in self._grid and self._grid[pos] == letter:
-			x, y = pos
-			return self.search(remaining, x, y, rule)
+		letter = remaining[0]
+
+		next_pos = move[rule](*pos)
+		if next_pos in self._grid and self._grid[next_pos] == letter:
+			return [pos] + self.search(remaining, rule, next_pos)
+
+		return []
 
 	@property
 	def _letters_idx(self):
@@ -293,22 +310,42 @@ class Suchsel():
 		return _
 
 	def fill(self, filler):
+		self.checkpoint()
+
+		filler = list(filler)
 		for y in range(self._height):
 			for x in range(self._width):
 				pos = (x, y)
 				if pos not in self._grid:
-					self._grid[pos] = filler.get()
+					self._grid[pos] = filler.pop(0)
+
+		if self.validate():
+			return True
+		else:
+			self.rollback()
+			return False
+
+	def validate(self):
+		for word in self._words:
+			if self.is_coocurence(word):
+				return False
+		return True
 
 	def dump(self):
 		from pprint import pprint
+		print ('*'*80)
 		print ('\n'.join(self._words))
-		print ("  " + ("0123456789" * 10)[:self._width])
+		#print ("  " + ("0123456789" * 10)[:self._width])
+		print ('####')
 		for y in range(self._height):
 			line = [ ]
 			for x in range(self._width):
 				letter = self._grid.get((x, y), " ")
 				line.append(str(letter))
-			print(f'{y:02}' + ("".join(line)))
+			#print(f'{y:02}' + ("".join(line)))
+			print("".join(line))
+		print ('####')
+		print (self.hidden_word)
 		
 
 	def write_svg(self, output_filename, place_letters = True):
@@ -396,3 +433,17 @@ class Suchsel():
 			db.ws(ws='solution').update_index(row=2, col=1, val=self.print_word(solution))
 
 		xl.writexl(db=db, fn=f'{basename}.xls')
+
+	def write_txt(self, outfile):
+		fh = open(outfile, 'w')
+		fh.write('\n'.join(self._words))
+		fh.write('\n####\n')
+		for y in range(self._height):
+			line = [ ]
+			for x in range(self._width):
+				letter = self._grid.get((x, y), "@")
+				line.append(str(letter))
+			fh.write("".join(line) + '\n')
+		fh.write('####\n')
+		fh.write(self.hidden_word)
+		fh.close()
