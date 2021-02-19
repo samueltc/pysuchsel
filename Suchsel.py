@@ -21,6 +21,8 @@
 import random
 import collections
 from SVGDocument import SVGDocument
+import pylightxl as xl
+import os
 
 class VoidPlaceholder():
 	def __eq__(self, other):
@@ -48,13 +50,29 @@ class ArrowMarker():
 			"down":		"v",
 		}.get(self._direction, "?")
 
+move = dict(
+	lr=lambda x, y: (x + 1, y),
+	rl=lambda x, y: (x - 1, y),
+	tb=lambda x, y: (x, y - 1),
+	bt=lambda x, y: (x, y + 1),
+	dbr=lambda x, y: (x + 1, y - 1),
+	dbl=lambda x, y: (x - 1, y - 1),
+	dtr=lambda x, y: (x + 1, y + 1),
+	dtl=lambda x, y: (x - 1, y + 1)
+)
+
 class Suchsel():
-	def __init__(self, width, height, placement, attempts):
+	def __init__(self, width, height, placement, attempts, verbose=0, print_word=None):
 		self._width = width
 		self._height = height
 		self._placement = placement
 		self._attempts = attempts
 		self._grid = { }
+		self._words = []
+		self._rules = dict()
+		self._verbose = verbose
+		self.print_word = print_word
+		self.hidden_word = None
 
 	def _rulerange(self, origin_x, origin_y, rulename):
 		(x, y) = (origin_x, origin_y)
@@ -170,9 +188,18 @@ class Suchsel():
 		# All letters fit!
 		for (want_place, (x, y)) in zip(word, self._rulerange(src_x, src_y, rule)):
 			self._grid[(x, y)] = want_place
+
+		# Track used rules
+		if rule not in self._rules:
+			self._rules[rule] = 0
+		self._rules[rule] += 1
+
+		if self._verbose > 1:
+			self.dump()
+
 		return True
 
-	def place(self, word, contiguous = False):
+	def _place(self, word, contiguous = False):
 		# First try contiguous placement
 		if contiguous and (len(self._grid) > 0):
 			for i in range(self._attempts):
@@ -183,6 +210,35 @@ class Suchsel():
 				return True
 		return False
 
+	def checkpoint(self):
+		self._grid_previous = self._grid.copy()
+
+	def rollback(self):
+		self._grid = self._grid_previous
+
+	def place(self, word, contiguous = False):
+		self.checkpoint()
+
+		if self.is_substring(word):
+			if self._verbose > 0:
+				print ("Won't place:", word, " because is substring.")
+			return False
+
+		if not self._place(word, contiguous):
+			return False
+
+		for _ in self._words + [word]:
+			if self.is_coocurence(_):
+				# rollback
+				if self._verbose > 0:
+					print ('found cooccurence! grid rollback...')
+				self.rollback()
+				return False
+
+		self._words.append(word)
+
+		return True
+
 	def place_crossword(self, word, crossword_marker):
 		contiguous = (len(self._grid) > 0)
 		for i in range(self._attempts):
@@ -190,22 +246,107 @@ class Suchsel():
 				return True
 		return False
 
+	@property
+	def void(self):
+		spaces = self._height * self._width
+		return (spaces - len(self._grid))
+	
+	def hide_word(self, word):
+		if self.void == len(word):
+			if self._verbose > 0:
+				print ('Can hide', word)
+			return True
+		else:
+			return False
+
+	def can_hide(self):
+		hidden_size = random.randrange(5,12)
+		if self.void <= hidden_size:
+			if self._verbose > 0:
+				print ('Will hide a word of length', self.void, hidden_size)
+			return hidden_size
+
+	def is_substring(self, word):
+		for placed in self._words:
+			if word in placed or placed in word:
+				if self._verbose > 1:
+					print ('attempt', word, 'placed', placed, 'are substring!')
+				return True
+		return False
+
+	def is_coocurence(self, word):
+		count = 0
+		for pos in self._letters_idx[word[0]]:
+			for rule in move.keys():
+				path = self.search(word, rule, pos)
+				if len(path) == len(word):
+					count += 1
+
+		if count > 1:
+			return True
+
+		return count > 1
+
+	def search(self, word, rule, pos):
+		remaining = word[1:]
+		if not remaining:
+			return [pos]
+
+		letter = remaining[0]
+
+		next_pos = move[rule](*pos)
+		if next_pos in self._grid and self._grid[next_pos] == letter:
+			return [pos] + self.search(remaining, rule, next_pos)
+
+		return []
+
+	@property
+	def _letters_idx(self):
+		_ = dict()
+		for pos, letter in self._grid.items():
+			if letter not in _:
+				_[letter] = []
+			_[letter].append(pos)
+		return _
+
 	def fill(self, filler):
+		self.checkpoint()
+
+		filler = list(filler)
 		for y in range(self._height):
 			for x in range(self._width):
 				pos = (x, y)
 				if pos not in self._grid:
-					self._grid[pos] = filler.get()
+					self._grid[pos] = filler.pop(0)
+
+		if self.validate():
+			return True
+		else:
+			self.rollback()
+			return False
+
+	def validate(self):
+		for word in self._words:
+			if self.is_coocurence(word):
+				return False
+		return True
 
 	def dump(self):
-		print("+-" + "-" * (2 * self._width) + "-+")
+		from pprint import pprint
+		print ('*'*80)
+		print ('\n'.join(self._words))
+		#print ("  " + ("0123456789" * 10)[:self._width])
+		print ('####')
 		for y in range(self._height):
 			line = [ ]
 			for x in range(self._width):
 				letter = self._grid.get((x, y), " ")
 				line.append(str(letter))
-			print("| " + (" ".join(line)) + "  |")
-		print("+-" + ("-" * (2 * self._width)) + "-+")
+			#print(f'{y:02}' + ("".join(line)))
+			print("".join(line))
+		print ('####')
+		print (self.hidden_word)
+		
 
 	def write_svg(self, output_filename, place_letters = True):
 		svg = SVGDocument()
@@ -227,3 +368,82 @@ class Suchsel():
 			svg.write(f)
 
 
+	def write_xls(self, solution, outfile=None, metafile=False):
+		size_x, size_y = (self._height, self._width)
+		words = self._words
+
+		if not outfile:
+			basename = f'mots-caches-{size_x}-{size_y}-{len(words):03}-{solution}'
+		else:
+			basename = outfile
+
+		words = sorted(words)
+
+		##########
+		# game
+		db = xl.Database()
+		db.add_ws(ws="jeu")
+		for col in range(self._width):
+			for row in range(self._height):
+				pos = (col, row)
+				letter = self._grid.get(pos)
+				db.ws(ws='jeu').update_index(row=row+1, col=col+1, val=letter)
+
+		##########
+		# words
+		if metafile:
+			fh_mots = open(f'{basename}-mots.txt', 'w')
+			fh_mots.write(f'Mot de {len(solution)} lettres.\n')
+		else:
+			db.add_ws(ws="mots")		
+
+		letter = None
+		col = 0
+		for word in words:
+			if word[0] != letter:
+				col += 1
+				letter = word[0]
+				row = 2
+				if metafile:
+					fh_mots.write(f'{letter}\n')
+				else:
+					db.ws(ws='mots').update_index(row=row, col=col, val=letter)			
+				print (row, letter)
+
+			row += 1
+			print (11, row, word)
+			if metafile:
+				fh_mots.write(f'{self.print_word(word)}\n')
+			else:
+				db.ws(ws='mots').update_index(row=row, col=col, val=self.print_word(word))
+
+
+		if metafile:
+			fh_mots.close()
+
+		##########
+		# solution
+		if metafile:
+			fh_solution = open(f'{basename}-solution.txt', 'w')
+			fh_solution.write(self.print_word(solution))
+			fh_solution.close()
+		else:
+			db.add_ws(ws="solution")
+			db.ws(ws='solution').update_index(row=1, col=1, val=f'Mot de {len(solution)} lettres.')
+			db.ws(ws='solution').update_index(row=2, col=1, val=self.print_word(solution))
+
+		xl.writexl(db=db, fn=f'{basename}.xls')
+
+	def write_txt(self, outfile):
+		fh = open(outfile, 'w')
+		fh.write('\n'.join(self._words))
+		fh.write('\n####\n')
+		for y in range(self._height):
+			line = [ ]
+			for x in range(self._width):
+				letter = self._grid.get((x, y), "@")
+				line.append(str(letter))
+			fh.write("".join(line) + '\n')
+		fh.write('####\n')
+		fh.write(self.hidden_word)
+		fh.close()
